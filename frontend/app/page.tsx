@@ -1,17 +1,36 @@
+'use client'
+import { useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { supabase } from '@/lib/supabase'
+
 export default function Home() {
+  const router = useRouter()
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      const {
+        data: { session }
+      } = await supabase.auth.getSession()
+
+      if (session?.user) {
+        router.push('/dashboard')
+      } else {
+        router.push('/auth')
+      }
+    }
+    checkAuth()
+  }, [router])
+
   return (
-    <main className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
-      <div className="text-center">
-        <h1 className="text-4xl font-bold mb-4">
-          Company Brain
-        </h1>
-        <p className="text-gray-400 text-lg">
-          The memory layer for AI-powered companies
-        </p>
-        <div className="mt-8 px-4 py-2 bg-green-500 rounded-full inline-block text-sm">
-          ✅ Frontend Running
-        </div>
-      </div>
-    </main>
+    <div style={{
+      minHeight: '100vh',
+      backgroundColor: '#030712',
+      color: 'white',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center'
+    }}>
+      <p style={{ color: '#64748b' }}>Loading...</p>
+    </div>
   )
 }
