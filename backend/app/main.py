@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.database import supabase, settings
-import os
+from app.api.routes import organizations
 
 app = FastAPI(
     title="Company Brain API",
@@ -18,6 +18,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Routes
+app.include_router(
+    organizations.router,
+    prefix="/api",
+    tags=["organizations"]
+)
+
 @app.get("/")
 def root():
     return {
@@ -28,13 +35,14 @@ def root():
 
 @app.get("/health")
 def health_check():
-    # Test Supabase connection
     try:
-        # Simple query to test connection
-        result = supabase.table("organizations").select("count").limit(1).execute()
+        supabase.table("organizations")\
+            .select("count")\
+            .limit(1)\
+            .execute()
         db_status = "connected"
     except Exception as e:
-        db_status = f"not connected — {str(e)}"
+        db_status = f"error: {str(e)}"
 
     return {
         "status": "healthy",
