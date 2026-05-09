@@ -2,11 +2,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.database import supabase, settings
 from app.api.routes import organizations, ai
+from app.api.routes import organizations, ai, knowledge
 
 app = FastAPI(
     title="Company Brain API",
     description="The memory layer for AI-powered companies",
     version="0.1.0"
+)
+app.include_router(
+    knowledge.router,
+    prefix="/api",
+    tags=["knowledge"]
 )
 
 # CORS
