@@ -284,6 +284,21 @@ export default function Dashboard() {
             >
               🔌 Connect Slack
             </button>
+            <button
+              onClick={() => router.push('/dashboard/skills')}
+              style={{
+                padding: '0.6rem 1.5rem',
+                backgroundColor: '#1e1b4b',
+                color: '#a78bfa',
+                border: '1px solid #4c1d95',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontSize: '0.9rem',
+                fontWeight: 'bold'
+              }}
+            >
+              ⚡ Skills File
+            </button>
           </div>
         </div>
 
