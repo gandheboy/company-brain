@@ -3,8 +3,50 @@ from fastapi.responses import RedirectResponse
 from app.core.auth import get_current_user, get_current_org
 from app.core.database import supabase, settings
 import httpx
+from app.services.slack_service import ingest_slack_workspace
+import asyncio
 
 router = APIRouter()
+
+@router.get("/integrations/slack/connect-url")
+async def slack_connect_url_test():
+    """
+    Get Slack OAuth URL without auth.
+    For development testing only.
+    """
+    if not settings.slack_client_id:
+        raise HTTPException(
+            status_code=500,
+            detail="Slack client ID not configured. Check your .env file."
+        )
+
+    # Get first org for testing
+    orgs = supabase.table("organizations")\
+        .select("id")\
+        .limit(1)\
+        .execute()
+
+    if not orgs.data:
+        raise HTTPException(
+            status_code=400,
+            detail="No organizations found."
+        )
+
+    org_id = orgs.data[0]["id"]
+
+    slack_oauth_url = (
+        f"https://slack.com/oauth/v2/authorize"
+        f"?client_id={settings.slack_client_id}"
+        f"&scope=channels:history,channels:read,users:read,team:read"
+        f"&redirect_uri={settings.slack_redirect_uri}"
+        f"&state={org_id}"
+    )
+
+    return {
+        "oauth_url": slack_oauth_url,
+        "org_id": org_id,
+        "instruction": "Open oauth_url in your browser to connect Slack"
+    }
 
 
 # ─────────────────────────────────────────
@@ -149,3 +191,115 @@ async def disconnect_integration(
         .execute()
 
     return {"message": "Integration disconnected"}
+
+# ─────────────────────────────────────────
+# TRIGGER SLACK SYNC
+# ─────────────────────────────────────────
+
+@router.post("/integrations/slack/sync")
+async def sync_slack(current_org=Depends(get_current_org)):
+    """
+    Manually trigger Slack ingestion.
+    Pulls messages and extracts knowledge.
+    """
+
+    # Get Slack integration
+    integration = supabase.table("integrations")\
+        .select("*")\
+        .eq("org_id", current_org["id"])\
+        .eq("type", "slack")\
+        .eq("status", "active")\
+        .single()\
+        .execute()
+
+    if not integration.data:
+        raise HTTPException(
+            status_code=404,
+            detail="Slack not connected. Please connect Slack first."
+        )
+
+    integration_data = integration.data
+
+    # Run ingestion
+    stats = await ingest_slack_workspace(
+        org_id=current_org["id"],
+        integration_id=integration_data["id"],
+        token=integration_data["access_token"]
+    )
+
+    return {
+        "message": "Slack sync complete",
+        "stats": stats
+    }
+
+
+@router.get("/integrations/slack/status")
+async def slack_status(current_org=Depends(get_current_org)):
+    """Check if Slack is connected"""
+
+    integration = supabase.table("integrations")\
+        .select("id, status, workspace_name, last_synced_at, total_documents")\
+        .eq("org_id", current_org["id"])\
+        .eq("type", "slack")\
+        .execute()
+
+    if not integration.data:
+        return {
+            "connected": False,
+            "workspace": None
+        }
+
+    return {
+        "connected": True,
+        "workspace": integration.data[0]["workspace_name"],
+        "last_synced": integration.data[0]["last_synced_at"],
+        "total_documents": integration.data[0]["total_documents"]
+    }
+
+@router.post("/integrations/slack/sync-test")
+async def sync_slack_test():
+    """
+    Trigger Slack sync without auth.
+    Development testing only.
+    """
+    # Get first org
+    orgs = supabase.table("organizations")\
+        .select("id, name")\
+        .limit(1)\
+        .execute()
+
+    if not orgs.data:
+        raise HTTPException(
+            status_code=400,
+            detail="No organizations found."
+        )
+
+    org_id = orgs.data[0]["id"]
+
+    # Get Slack integration
+    integration = supabase.table("integrations")\
+        .select("*")\
+        .eq("org_id", org_id)\
+        .eq("type", "slack")\
+        .execute()
+
+    if not integration.data:
+        raise HTTPException(
+            status_code=404,
+            detail="Slack not connected."
+        )
+
+    integration_data = integration.data[0]
+
+    # Run ingestion
+    stats = await ingest_slack_workspace(
+        org_id=org_id,
+        integration_id=integration_data["id"],
+        token=integration_data["access_token"]
+    )
+
+    return {
+        "message": "Slack sync complete",
+        "workspace": integration_data["workspace_name"],
+        "stats": stats
+    }
