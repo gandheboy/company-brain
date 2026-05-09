@@ -5,6 +5,7 @@ from app.core.database import supabase, settings
 import httpx
 from app.services.slack_service import ingest_slack_workspace
 import asyncio
+from app.services.notion_service import ingest_notion_workspace
 
 router = APIRouter()
 
@@ -302,4 +303,84 @@ async def sync_slack_test():
         "message": "Slack sync complete",
         "workspace": integration_data["workspace_name"],
         "stats": stats
+    }
+
+# ─────────────────────────────────────────
+# NOTION INTEGRATION
+# ─────────────────────────────────────────
+
+@router.post("/integrations/notion/sync-test")
+async def sync_notion_test():
+    """
+    Trigger Notion sync without auth.
+    Development testing only.
+    """
+    if not settings.notion_api_key:
+        raise HTTPException(
+            status_code=500,
+            detail="Notion API key not configured. Add NOTION_API_KEY to .env"
+        )
+
+    # Get first org
+    orgs = supabase.table("organizations")\
+        .select("id, name")\
+        .limit(1)\
+        .execute()
+
+    if not orgs.data:
+        raise HTTPException(
+            status_code=400,
+            detail="No organizations found."
+        )
+
+    org_id = orgs.data[0]["id"]
+
+    # Check if integration exists
+    existing = supabase.table("integrations")\
+        .select("id")\
+        .eq("org_id", org_id)\
+        .eq("type", "notion")\
+        .execute()
+
+    if existing.data:
+        integration_id = existing.data[0]["id"]
+    else:
+        # Create integration record
+        result = supabase.table("integrations").insert({
+            "org_id": org_id,
+            "type": "notion",
+            "status": "active",
+            "workspace_name": "Notion Workspace"
+        }).execute()
+        integration_id = result.data[0]["id"]
+
+    # Run ingestion
+    stats = await ingest_notion_workspace(
+        org_id=org_id,
+        integration_id=integration_id
+    )
+
+    return {
+        "message": "Notion sync complete",
+        "stats": stats
+    }
+
+
+@router.get("/integrations/notion/status")
+async def notion_status(current_org=Depends(get_current_org)):
+    """Check if Notion is connected"""
+
+    integration = supabase.table("integrations")\
+        .select("id, status, last_synced_at, total_documents")\
+        .eq("org_id", current_org["id"])\
+        .eq("type", "notion")\
+        .execute()
+
+    if not integration.data:
+        return {"connected": False}
+
+    return {
+        "connected": True,
+        "last_synced": integration.data[0]["last_synced_at"],
+        "total_documents": integration.data[0]["total_documents"]
     }

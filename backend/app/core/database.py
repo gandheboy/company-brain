@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     app_env: str = os.getenv("APP_ENV", "development")
     frontend_url: str = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
+    # Notion
+    notion_api_key: str = os.getenv("NOTION_API_KEY", "")
+
     # Slack
     slack_client_id: str = os.getenv("SLACK_CLIENT_ID", "")
     slack_client_secret: str = os.getenv("SLACK_CLIENT_SECRET", "")
