@@ -168,7 +168,7 @@ export default function Dashboard() {
   }}
 >
   💬 Ask Your Brain
-</button>
+</button> 
         </div>
 
         {/* Stats */}
