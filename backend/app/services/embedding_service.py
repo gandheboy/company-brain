@@ -1,7 +1,7 @@
 from sentence_transformers import SentenceTransformer
 import numpy as np
-from typing import Union
-import asyncio
+from typing import Any
+import json
 
 # Load model once at startup
 # all-MiniLM-L6-v2 is:
@@ -65,13 +65,47 @@ def cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float:
     Calculate similarity between two embeddings.
     Returns: 0.0 (completely different) to 1.0 (identical)
     """
-    a = np.array(vec_a)
-    b = np.array(vec_b)
+    a = _to_float_vector(vec_a)
+    b = _to_float_vector(vec_b)
 
-    if np.linalg.norm(a) == 0 or np.linalg.norm(b) == 0:
+    if a.size == 0 or b.size == 0 or a.size != b.size:
         return 0.0
 
-    return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
+    norm_a = np.linalg.norm(a)
+    norm_b = np.linalg.norm(b)
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+
+    return float(np.dot(a, b) / (norm_a * norm_b))
+
+
+def _to_float_vector(value: Any) -> np.ndarray:
+    """Convert embedding payloads from DB/API into a 1-D float vector."""
+    if value is None:
+        return np.array([], dtype=float)
+
+    parsed = value
+    if isinstance(parsed, str):
+        parsed = parsed.strip()
+        if not parsed:
+            return np.array([], dtype=float)
+        try:
+            parsed = json.loads(parsed)
+        except json.JSONDecodeError:
+            return np.array([], dtype=float)
+
+    if isinstance(parsed, str):
+        return np.array([], dtype=float)
+
+    try:
+        vector = np.asarray(parsed, dtype=float).ravel()
+    except (TypeError, ValueError):
+        return np.array([], dtype=float)
+
+    if vector.size == 0:
+        return np.array([], dtype=float)
+
+    return vector
 
 
 def find_similar(

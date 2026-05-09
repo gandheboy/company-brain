@@ -113,28 +113,42 @@ JSON array:"""
     try:
         raw = await call_ollama(prompt)
         cleaned = clean_json_response(raw)
-        nodes = json.loads(cleaned)
 
-        if not isinstance(nodes, list):
-            return []
+        # Strategy 1: Direct parse
+        try:
+            nodes = json.loads(cleaned)
+            if isinstance(nodes, list):
+                valid_nodes = [
+                    n for n in nodes
+                    if isinstance(n, dict)
+                    and n.get("title")
+                    and n.get("content")
+                    and n.get("confidence", 0) >= 0.6
+                ]
+                return valid_nodes
+        except Exception:
+            pass
 
-        # Validate and filter
-        valid_nodes = []
-        for node in nodes:
-            if (
-                isinstance(node, dict)
-                and node.get("title")
-                and node.get("content")
-                and node.get("confidence", 0) >= 0.6
-            ):
-                valid_nodes.append(node)
+        # Strategy 2: Find JSON array
+        import re
+        array_match = re.search(r'\[.*?\]', raw, re.DOTALL)
+        if array_match:
+            try:
+                nodes = json.loads(array_match.group())
+                if isinstance(nodes, list):
+                    return [
+                        n for n in nodes
+                        if isinstance(n, dict)
+                        and n.get("title")
+                        and n.get("content")
+                    ]
+            except Exception:
+                pass
 
-        return valid_nodes
-
-    except json.JSONDecodeError as e:
-        print(f"JSON parse error in extraction: {e}")
-        print(f"Raw response: {raw[:500]}")
+        # Strategy 3: Return empty if all parsing fails
+        print(f"Could not parse extraction response: {raw[:200]}")
         return []
+
     except Exception as e:
         print(f"Extraction error: {e}")
         return []
@@ -222,29 +236,83 @@ Entry A: {node_a['title']}
 Entry B: {node_b['title']}
 {node_b['content']}
 
-Return ONLY a JSON object:
-{{
-  "has_conflict": true or false,
-  "conflict_type": "contradiction or overlap or supersedes or none",
-  "explanation": "brief explanation",
-  "recommendation": "how to resolve or null"
-}}
+Do these contradict each other?
 
-JSON:"""
+Reply with ONLY this JSON, nothing else:
+{{"has_conflict": true, "conflict_type": "contradiction", "explanation": "reason here", "recommendation": "fix here"}}
+
+Or if no conflict:
+{{"has_conflict": false, "conflict_type": "none", "explanation": "they are consistent", "recommendation": null}}"""
 
     try:
-        raw = await call_ollama(prompt, max_tokens=300)
+        raw = await call_ollama(prompt, max_tokens=200)
+
+        # Try multiple parsing strategies
         cleaned = clean_json_response(raw)
-        return json.loads(cleaned)
+
+        # Strategy 1: Direct parse
+        try:
+            return json.loads(cleaned)
+        except Exception:
+            pass
+
+        # Strategy 2: Find JSON in response
+        import re
+        json_match = re.search(r'\{[^{}]+\}', raw, re.DOTALL)
+        if json_match:
+            try:
+                return json.loads(json_match.group())
+            except Exception:
+                pass
+
+        # Strategy 3: Parse keywords from response
+        raw_lower = raw.lower()
+        has_conflict = any(word in raw_lower for word in [
+            "contradict", "conflict", "inconsistent",
+            "different", "opposite", "disagree"
+        ])
+
+        return {
+            "has_conflict": has_conflict,
+            "conflict_type": "contradiction" if has_conflict else "none",
+            "explanation": raw[:200] if raw else "Could not analyze",
+            "recommendation": "Review both entries manually" if has_conflict else None
+        }
 
     except Exception as e:
         print(f"Conflict detection error: {e}")
         return {
             "has_conflict": False,
             "conflict_type": "none",
-            "explanation": "Could not analyze",
+            "explanation": "Analysis failed",
             "recommendation": None
         }
+
+
+def _parse_json_object(text: str) -> dict | None:
+    """Parse the first JSON object from model output safely."""
+    cleaned = clean_json_response(text)
+
+    try:
+        parsed = json.loads(cleaned)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+
+    start = cleaned.find("{")
+    if start == -1:
+        return None
+
+    try:
+        decoder = json.JSONDecoder()
+        parsed, _ = decoder.raw_decode(cleaned[start:])
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        return None
+
+    return None
 
 
 # ─────────────────────────────────────────

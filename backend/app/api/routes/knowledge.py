@@ -36,8 +36,165 @@ class SearchRequest(BaseModel):
     limit: int = 5
 
 
+class QueryRequest(BaseModel):
+    question: str
+
+
+class ResolveConflictRequest(BaseModel):
+    keep_node_id: str
+    discard_node_id: str
+
+
 # ─────────────────────────────────────────
-# SAVE A SINGLE NODE
+# NO AUTH TEST ENDPOINTS
+# ─────────────────────────────────────────
+
+@router.post("/knowledge/extract-save-test")
+async def extract_save_test(request: ExtractAndSaveRequest):
+    """Test extraction without auth. Dev only."""
+    from app.core.database import supabase
+
+    orgs = supabase.table("organizations")\
+        .select("id")\
+        .limit(1)\
+        .execute()
+
+    if not orgs.data:
+        raise HTTPException(
+            status_code=400,
+            detail="No organizations found. Please sign up first."
+        )
+
+    org_id = orgs.data[0]["id"]
+
+    nodes = await extract_knowledge(
+        request.text,
+        request.source_type
+    )
+
+    if not nodes:
+        return {
+            "message": "No knowledge found",
+            "nodes_saved": 0,
+            "nodes": []
+        }
+
+    saved = await save_knowledge_nodes_batch(
+        org_id=org_id,
+        nodes=nodes
+    )
+
+    return {
+        "message": f"Extracted and saved {len(saved)} nodes",
+        "nodes_saved": len(saved),
+        "nodes": saved
+    }
+
+
+@router.post("/knowledge/query-test")
+async def query_test(request: QueryRequest):
+    """Full query pipeline without auth. Dev only."""
+    from app.core.database import supabase
+    from app.services.ai_service import answer_question
+
+    if not request.question.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Question cannot be empty"
+        )
+
+    orgs = supabase.table("organizations")\
+        .select("id, name")\
+        .limit(1)\
+        .execute()
+
+    if not orgs.data:
+        raise HTTPException(
+            status_code=400,
+            detail="No organizations found."
+        )
+
+    org_id = orgs.data[0]["id"]
+    org_name = orgs.data[0]["name"]
+
+    results = search_knowledge(
+        org_id=org_id,
+        query=request.question,
+        limit=5
+    )
+
+    answer = await answer_question(
+        question=request.question,
+        knowledge_nodes=results,
+        org_name=org_name
+    )
+
+    return {
+        "question": request.question,
+        "answer": answer.get("answer"),
+        "confidence": answer.get("confidence"),
+        "has_answer": answer.get("has_answer"),
+        "sources": answer.get("sources_used", []),
+        "nodes_searched": len(results),
+        "missing_info": answer.get("missing_info")
+    }
+
+
+@router.get("/knowledge/conflicts-test")
+async def get_conflicts_test():
+    """Find conflicts without auth. Dev only."""
+    from app.core.database import supabase
+    from app.services.knowledge_service import find_conflicts_for_org
+
+    orgs = supabase.table("organizations")\
+        .select("id")\
+        .limit(1)\
+        .execute()
+
+    if not orgs.data:
+        raise HTTPException(
+            status_code=400,
+            detail="No organizations found."
+        )
+
+    conflicts = await find_conflicts_for_org(
+        orgs.data[0]["id"]
+    )
+
+    return {
+        "total_conflicts": len(conflicts),
+        "conflicts": conflicts
+    }
+
+
+@router.post("/knowledge/conflicts/resolve-test")
+async def resolve_conflict_test(request: ResolveConflictRequest):
+    """Resolve conflict without auth. Dev only."""
+    from app.core.database import supabase
+    from app.services.knowledge_service import resolve_conflict
+
+    orgs = supabase.table("organizations")\
+        .select("id")\
+        .limit(1)\
+        .execute()
+
+    if not orgs.data:
+        raise HTTPException(
+            status_code=400,
+            detail="No org found"
+        )
+
+    result = await resolve_conflict(
+        org_id=orgs.data[0]["id"],
+        keep_node_id=request.keep_node_id,
+        discard_node_id=request.discard_node_id
+    )
+
+    return result
+
+
+# ─────────────────────────────────────────
+# AUTH REQUIRED ENDPOINTS
 # ─────────────────────────────────────────
 
 @router.post("/knowledge/nodes")
@@ -59,163 +216,12 @@ async def create_knowledge_node(
     return node
 
 
-# ─────────────────────────────────────────
-# EXTRACT FROM TEXT AND SAVE
-# ─────────────────────────────────────────
-
 @router.post("/knowledge/extract-and-save")
 async def extract_and_save(
     request: ExtractAndSaveRequest,
     current_org=Depends(get_current_org)
 ):
-    """
-    Extract knowledge from text AND save to database.
-    This is the core pipeline endpoint.
-    """
-
-    # Step 1: Extract nodes using AI
-    nodes = await extract_knowledge(
-        request.text,
-        request.source_type
-    )
-
-    if not nodes:
-        return {
-            "message": "No knowledge found in this text",
-            "nodes_saved": 0,
-            "nodes": []
-        }
-
-    # Step 2: Save nodes with embeddings
-    saved = await save_knowledge_nodes_batch(
-        org_id=current_org["id"],
-        nodes=nodes
-    )
-
-    return {
-        "message": f"Successfully extracted and saved {len(saved)} knowledge nodes",
-        "nodes_saved": len(saved),
-        "nodes": saved
-    }
-
-
-# ─────────────────────────────────────────
-# GET ALL NODES
-# ─────────────────────────────────────────
-
-@router.get("/knowledge/nodes")
-async def list_knowledge_nodes(
-    node_type: Optional[str] = None,
-    limit: int = 50,
-    current_org=Depends(get_current_org)
-):
-    """Get all knowledge nodes for this organization"""
-    nodes = get_knowledge_nodes(
-        org_id=current_org["id"],
-        node_type=node_type,
-        limit=limit
-    )
-    return {
-        "total": len(nodes),
-        "nodes": nodes
-    }
-
-
-# ─────────────────────────────────────────
-# SEARCH
-# ─────────────────────────────────────────
-
-@router.post("/knowledge/search")
-async def search_knowledge_nodes(
-    request: SearchRequest,
-    current_org=Depends(get_current_org)
-):
-    """
-    Search knowledge using semantic vector search.
-    This powers the query interface.
-    """
-    results = search_knowledge(
-        org_id=current_org["id"],
-        query=request.query,
-        limit=request.limit
-    )
-
-    return {
-        "query": request.query,
-        "results_found": len(results),
-        "results": results
-    }
-
-
-# ─────────────────────────────────────────
-# VERIFY NODE
-# ─────────────────────────────────────────
-
-@router.patch("/knowledge/nodes/{node_id}/verify")
-async def verify_node(
-    node_id: str,
-    current_org=Depends(get_current_org)
-):
-    """Mark a node as human-verified"""
-    node = verify_knowledge_node(node_id, current_org["id"])
-    return node
-
-
-# ─────────────────────────────────────────
-# MARK OUTDATED
-# ─────────────────────────────────────────
-
-@router.patch("/knowledge/nodes/{node_id}/outdated")
-async def mark_outdated(
-    node_id: str,
-    current_org=Depends(get_current_org)
-):
-    """Mark a node as outdated"""
-    node = mark_node_outdated(node_id, current_org["id"])
-    return node
-
-
-# ─────────────────────────────────────────
-# DELETE NODE
-# ─────────────────────────────────────────
-
-@router.delete("/knowledge/nodes/{node_id}")
-async def delete_node(
-    node_id: str,
-    current_org=Depends(get_current_org)
-):
-    """Delete a knowledge node"""
-    delete_knowledge_node(node_id, current_org["id"])
-    return {"message": "Node deleted successfully"}
-
-
-# ─────────────────────────────────────────
-# TEST ENDPOINT — NO AUTH
-# ─────────────────────────────────────────
-
-@router.post("/knowledge/extract-save-test")
-async def extract_save_test(request: ExtractAndSaveRequest):
-    """
-    Test extract and save WITHOUT auth.
-    Development only.
-    """
-    from app.core.database import supabase
-
-    # Get first org for testing
-    orgs = supabase.table("organizations")\
-        .select("id")\
-        .limit(1)\
-        .execute()
-
-    if not orgs.data:
-        raise HTTPException(
-            status_code=400,
-            detail="No organizations found. Please sign up first."
-        )
-
-    org_id = orgs.data[0]["id"]
-
-    # Extract
+    """Extract and save knowledge nodes"""
     nodes = await extract_knowledge(
         request.text,
         request.source_type
@@ -228,74 +234,51 @@ async def extract_save_test(request: ExtractAndSaveRequest):
             "nodes": []
         }
 
-    # Save
     saved = await save_knowledge_nodes_batch(
-        org_id=org_id,
+        org_id=current_org["id"],
         nodes=nodes
     )
 
     return {
-        "message": f"Extracted and saved {len(saved)} nodes",
+        "message": f"Saved {len(saved)} nodes",
         "nodes_saved": len(saved),
         "nodes": saved
     }
 
-class QueryRequest(BaseModel):
-    question: str
 
-
-@router.post("/knowledge/query-test")
-async def query_test(request: QueryRequest):
-    """
-    Full query pipeline WITHOUT auth.
-    Development testing only.
-    """
-    from app.core.database import supabase
-    from app.services.ai_service import answer_question
-
-    if not request.question.strip():
-        raise HTTPException(
-            status_code=400,
-            detail="Question cannot be empty"
-        )
-
-    # Get first org for testing
-    orgs = supabase.table("organizations")\
-        .select("id, name")\
-        .limit(1)\
-        .execute()
-
-    if not orgs.data:
-        raise HTTPException(
-            status_code=400,
-            detail="No organizations found."
-        )
-
-    org_id = orgs.data[0]["id"]
-    org_name = orgs.data[0]["name"]
-
-    # Search for relevant knowledge
-    results = search_knowledge(
-        org_id=org_id,
-        query=request.question,
-        limit=5
+@router.get("/knowledge/nodes")
+async def list_knowledge_nodes(
+    node_type: Optional[str] = None,
+    limit: int = 50,
+    current_org=Depends(get_current_org)
+):
+    """Get all knowledge nodes"""
+    nodes = get_knowledge_nodes(
+        org_id=current_org["id"],
+        node_type=node_type,
+        limit=limit
     )
-
-    # Generate answer using AI
-    answer = await answer_question(
-        question=request.question,
-        knowledge_nodes=results,
-        org_name=org_name
-    )
-
     return {
-        "question": request.question,
-        "answer": answer.get("answer"),
-        "confidence": answer.get("confidence"),
-        "has_answer": answer.get("has_answer"),
-        "sources": answer.get("sources_used", []),
-        "nodes_searched": len(results),
-        "missing_info": answer.get("missing_info")
+        "total": len(nodes),
+        "nodes": nodes
+    }
+
+
+@router.post("/knowledge/search")
+async def search_knowledge_nodes(
+    request: SearchRequest,
+    current_org=Depends(get_current_org)
+):
+    """Semantic search"""
+    results = search_knowledge(
+        org_id=current_org["id"],
+        query=request.query,
+        limit=request.limit
+    )
+    return {
+        "query": request.query,
+        "results_found": len(results),
+        "results": results
     }
 
 
@@ -304,26 +287,15 @@ async def query_knowledge(
     request: QueryRequest,
     current_org=Depends(get_current_org)
 ):
-    """
-    Full query pipeline WITH auth.
-    Production endpoint.
-    """
+    """Full query pipeline with auth"""
     from app.services.ai_service import answer_question
 
-    if not request.question.strip():
-        raise HTTPException(
-            status_code=400,
-            detail="Question cannot be empty"
-        )
-
-    # Search relevant knowledge
     results = search_knowledge(
         org_id=current_org["id"],
         query=request.question,
         limit=5
     )
 
-    # Generate answer
     answer = await answer_question(
         question=request.question,
         knowledge_nodes=results,
@@ -339,3 +311,67 @@ async def query_knowledge(
         "nodes_searched": len(results),
         "missing_info": answer.get("missing_info")
     }
+
+
+@router.patch("/knowledge/nodes/{node_id}/verify")
+async def verify_node(
+    node_id: str,
+    current_org=Depends(get_current_org)
+):
+    """Mark node as verified"""
+    node = verify_knowledge_node(node_id, current_org["id"])
+    return node
+
+
+@router.patch("/knowledge/nodes/{node_id}/outdated")
+async def mark_outdated(
+    node_id: str,
+    current_org=Depends(get_current_org)
+):
+    """Mark node as outdated"""
+    node = mark_node_outdated(node_id, current_org["id"])
+    return node
+
+
+@router.delete("/knowledge/nodes/{node_id}")
+async def delete_node(
+    node_id: str,
+    current_org=Depends(get_current_org)
+):
+    """Delete a knowledge node"""
+    delete_knowledge_node(node_id, current_org["id"])
+    return {"message": "Node deleted"}
+
+
+@router.get("/knowledge/conflicts")
+async def get_conflicts(
+    current_org=Depends(get_current_org)
+):
+    """Find all conflicts with auth"""
+    from app.services.knowledge_service import find_conflicts_for_org
+
+    conflicts = await find_conflicts_for_org(
+        current_org["id"]
+    )
+
+    return {
+        "total_conflicts": len(conflicts),
+        "conflicts": conflicts
+    }
+
+
+@router.post("/knowledge/conflicts/resolve")
+async def resolve_conflict_route(
+    request: ResolveConflictRequest,
+    current_org=Depends(get_current_org)
+):
+    """Resolve a conflict with auth"""
+    from app.services.knowledge_service import resolve_conflict
+
+    result = await resolve_conflict(
+        org_id=current_org["id"],
+        keep_node_id=request.keep_node_id,
+        discard_node_id=request.discard_node_id
+    )
+
+    return result

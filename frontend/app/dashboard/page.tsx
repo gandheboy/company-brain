@@ -232,7 +232,8 @@ export default function Dashboard() {
           <div
             style={{
               display: 'flex',
-              gap: '1rem',
+              gap: '0.75rem',
+              marginTop: '1rem',
               flexWrap: 'wrap'
             }}
           >
@@ -250,6 +251,22 @@ export default function Dashboard() {
               }}
             >
               💬 Ask Your Brain
+            </button>
+
+            <button
+              onClick={() => router.push('/dashboard/conflicts')}
+              style={{
+                padding: '0.6rem 1.5rem',
+                backgroundColor: '#7c2d12',
+                color: '#fca5a5',
+                border: '1px solid #9a3412',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontSize: '0.9rem',
+                fontWeight: 'bold'
+              }}
+            >
+              ⚠️ View Conflicts
             </button>
 
             <button

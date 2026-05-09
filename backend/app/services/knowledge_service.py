@@ -225,3 +225,135 @@ def verify_knowledge_node(node_id: str, org_id: str) -> dict:
         .execute()
 
     return result.data[0] if result.data else {}
+
+# ─────────────────────────────────────────
+# CONFLICT DETECTION
+# ─────────────────────────────────────────
+
+async def find_conflicts_for_org(org_id: str) -> list[dict]:
+    """
+    Find conflicting knowledge nodes.
+    Fast version: uses embeddings first,
+    then AI only on top similar pairs.
+    """
+    from app.services.ai_service import detect_conflict
+    from app.services.embedding_service import cosine_similarity
+
+    # Get all nodes
+    result = supabase.table("knowledge_nodes")\
+        .select("id, title, content, type, embedding")\
+        .eq("org_id", org_id)\
+        .eq("is_outdated", False)\
+        .limit(30)\
+        .execute()
+
+    nodes = result.data or []
+
+    if len(nodes) < 2:
+        return []
+
+    # Step 1: Find similar pairs using embeddings
+    # This is instant — no AI calls needed
+    similar_pairs = []
+
+    for i, node_a in enumerate(nodes):
+        emb_a = node_a.get("embedding", [])
+        if not emb_a:
+            continue
+
+        for j, node_b in enumerate(nodes):
+            if i >= j:
+                continue
+
+            emb_b = node_b.get("embedding", [])
+            if not emb_b:
+                continue
+
+            similarity = cosine_similarity(emb_a, emb_b)
+
+            # Only consider highly similar nodes
+            # High similarity = same topic = possible conflict
+            if similarity > 0.6:
+                similar_pairs.append({
+                    "node_a": node_a,
+                    "node_b": node_b,
+                    "similarity": similarity
+                })
+
+    if not similar_pairs:
+        return []
+
+    # Step 2: Sort by similarity, take only TOP 5
+    # This limits Ollama calls to maximum 5
+    similar_pairs.sort(
+        key=lambda x: x["similarity"],
+        reverse=True
+    )
+    top_pairs = similar_pairs[:5]
+
+    print(f"Checking {len(top_pairs)} similar pairs for conflicts")
+
+    # Step 3: Check only top pairs with AI
+    conflicts = []
+
+    for pair in top_pairs:
+        node_a = pair["node_a"]
+        node_b = pair["node_b"]
+
+        print(f"Checking: '{node_a['title']}' vs '{node_b['title']}'")
+
+        conflict = await detect_conflict(node_a, node_b)
+
+        if conflict.get("has_conflict"):
+            conflicts.append({
+                "node_a": {
+                    "id": node_a["id"],
+                    "title": node_a["title"],
+                    "content": node_a["content"]
+                },
+                "node_b": {
+                    "id": node_b["id"],
+                    "title": node_b["title"],
+                    "content": node_b["content"]
+                },
+                "conflict_type": conflict.get("conflict_type"),
+                "explanation": conflict.get("explanation"),
+                "recommendation": conflict.get("recommendation"),
+                "similarity": round(pair["similarity"], 3)
+            })
+
+    print(f"Found {len(conflicts)} conflicts")
+    return conflicts
+
+
+async def resolve_conflict(
+    org_id: str,
+    keep_node_id: str,
+    discard_node_id: str
+) -> dict:
+    """
+    Resolve a conflict by keeping one node
+    and marking the other as outdated.
+    """
+    # Mark discarded node as outdated
+    supabase.table("knowledge_nodes")\
+        .update({
+            "is_outdated": True,
+            "outdated_reason": "Resolved conflict — superseded by newer node"
+        })\
+        .eq("id", discard_node_id)\
+        .eq("org_id", org_id)\
+        .execute()
+
+    # Verify kept node
+    result = supabase.table("knowledge_nodes")\
+        .update({"is_verified": True})\
+        .eq("id", keep_node_id)\
+        .eq("org_id", org_id)\
+        .execute()
+
+    return {
+        "message": "Conflict resolved",
+        "kept_node": keep_node_id,
+        "discarded_node": discard_node_id
+    }
