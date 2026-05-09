@@ -106,3 +106,72 @@ async def answer_question_route(
     )
 
     return result
+
+class EmbedRequest(BaseModel):
+    text: str
+
+
+@router.post("/ai/embed-test")
+async def embed_test(request: EmbedRequest):
+    """
+    Test embedding generation.
+    No auth required for testing.
+    """
+    from app.services.embedding_service import generate_embedding
+
+    if not request.text.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Text cannot be empty"
+        )
+
+    embedding = generate_embedding(request.text)
+
+    return {
+        "text": request.text,
+        "embedding_dimensions": len(embedding),
+        "first_5_values": embedding[:5],
+        "status": "success" if embedding else "failed"
+    }
+
+
+@router.post("/ai/similarity-test")
+async def similarity_test():
+    """
+    Test similarity between two texts.
+    Shows how semantic search works.
+    """
+    from app.services.embedding_service import (
+        generate_embedding,
+        cosine_similarity
+    )
+
+    # These should be very similar
+    text_a = "How do we handle customer refunds?"
+    text_b = "What is the refund approval process?"
+
+    # These should be very different
+    text_c = "How do we deploy to production?"
+
+    emb_a = generate_embedding(text_a)
+    emb_b = generate_embedding(text_b)
+    emb_c = generate_embedding(text_c)
+
+    sim_ab = cosine_similarity(emb_a, emb_b)
+    sim_ac = cosine_similarity(emb_a, emb_c)
+
+    return {
+        "test_1": {
+            "text_a": text_a,
+            "text_b": text_b,
+            "similarity": round(sim_ab, 4),
+            "verdict": "✅ Similar" if sim_ab > 0.5 else "❌ Not similar enough"
+        },
+        "test_2": {
+            "text_a": text_a,
+            "text_c": text_c,
+            "similarity": round(sim_ac, 4),
+            "verdict": "✅ Different" if sim_ac < 0.5 else "❌ Too similar"
+        },
+        "explanation": "Higher = more similar. >0.8 = very similar. <0.5 = different topic."
+    }
