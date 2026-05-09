@@ -14,6 +14,14 @@ class Settings(BaseSettings):
     app_env: str = os.getenv("APP_ENV", "development")
     frontend_url: str = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
+    # Slack
+    slack_client_id: str = os.getenv("SLACK_CLIENT_ID", "")
+    slack_client_secret: str = os.getenv("SLACK_CLIENT_SECRET", "")
+    slack_redirect_uri: str = os.getenv(
+        "SLACK_REDIRECT_URI",
+        "http://localhost:8000/api/integrations/slack/callback"
+    )
+
     class Config:
         env_file = ".env"
 
