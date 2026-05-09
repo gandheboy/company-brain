@@ -438,3 +438,157 @@ async def delete_node_test(node_id: str):
 
     delete_knowledge_node(node_id, orgs.data[0]["id"])
     return {"message": "Deleted"}
+
+class FeedbackRequest(BaseModel):
+    question: str
+    answer: str
+    was_helpful: bool
+    feedback_text: Optional[str] = None
+    node_ids_used: list[str] = []
+
+
+@router.post("/knowledge/feedback-test")
+async def submit_feedback_test(request: FeedbackRequest):
+    """Submit answer feedback without auth. Dev only."""
+    from app.core.database import supabase
+
+    orgs = supabase.table("organizations")\
+        .select("id")\
+        .limit(1)\
+        .execute()
+
+    if not orgs.data:
+        raise HTTPException(
+            status_code=400,
+            detail="No org found"
+        )
+
+    org_id = orgs.data[0]["id"]
+
+    # Save feedback
+    supabase.table("query_feedback").insert({
+        "org_id": org_id,
+        "question": request.question,
+        "answer": request.answer,
+        "was_helpful": request.was_helpful,
+        "feedback_text": request.feedback_text,
+        "node_ids_used": request.node_ids_used
+    }).execute()
+
+    # If helpful — boost confidence of used nodes
+    if request.was_helpful and request.node_ids_used:
+        for node_id in request.node_ids_used:
+            try:
+                # Get current score
+                node = supabase.table("knowledge_nodes")\
+                    .select("confidence_score")\
+                    .eq("id", node_id)\
+                    .single()\
+                    .execute()
+
+                if node.data:
+                    current = node.data["confidence_score"]
+                    # Boost by 2% max 0.99
+                    new_score = min(0.99, current + 0.02)
+                    supabase.table("knowledge_nodes")\
+                        .update({"confidence_score": new_score})\
+                        .eq("id", node_id)\
+                        .execute()
+            except Exception as e:
+                print(f"Score update error: {e}")
+
+    # If not helpful — reduce confidence
+    if not request.was_helpful and request.node_ids_used:
+        for node_id in request.node_ids_used:
+            try:
+                node = supabase.table("knowledge_nodes")\
+                    .select("confidence_score")\
+                    .eq("id", node_id)\
+                    .single()\
+                    .execute()
+
+                if node.data:
+                    current = node.data["confidence_score"]
+                    # Reduce by 3% min 0.3
+                    new_score = max(0.3, current - 0.03)
+                    supabase.table("knowledge_nodes")\
+                        .update({"confidence_score": new_score})\
+                        .eq("id", node_id)\
+                        .execute()
+            except Exception as e:
+                print(f"Score update error: {e}")
+
+    return {
+        "message": "Feedback recorded",
+        "was_helpful": request.was_helpful,
+        "nodes_updated": len(request.node_ids_used)
+    }
+
+
+@router.post("/knowledge/feedback")
+async def submit_feedback(
+    request: FeedbackRequest,
+    current_org=Depends(get_current_org)
+):
+    """Submit answer feedback with auth."""
+    from app.core.database import supabase
+
+    org_id = current_org["id"]
+
+    supabase.table("query_feedback").insert({
+        "org_id": org_id,
+        "question": request.question,
+        "answer": request.answer,
+        "was_helpful": request.was_helpful,
+        "feedback_text": request.feedback_text,
+        "node_ids_used": request.node_ids_used
+    }).execute()
+
+    if request.was_helpful and request.node_ids_used:
+        for node_id in request.node_ids_used:
+            try:
+                node = supabase.table("knowledge_nodes")\
+                    .select("confidence_score")\
+                    .eq("id", node_id)\
+                    .eq("org_id", org_id)\
+                    .single()\
+                    .execute()
+
+                if node.data:
+                    new_score = min(
+                        0.99,
+                        node.data["confidence_score"] + 0.02
+                    )
+                    supabase.table("knowledge_nodes")\
+                        .update({"confidence_score": new_score})\
+                        .eq("id", node_id)\
+                        .execute()
+            except Exception:
+                pass
+
+    if not request.was_helpful and request.node_ids_used:
+        for node_id in request.node_ids_used:
+            try:
+                node = supabase.table("knowledge_nodes")\
+                    .select("confidence_score")\
+                    .eq("id", node_id)\
+                    .eq("org_id", org_id)\
+                    .single()\
+                    .execute()
+
+                if node.data:
+                    new_score = max(
+                        0.3,
+                        node.data["confidence_score"] - 0.03
+                    )
+                    supabase.table("knowledge_nodes")\
+                        .update({"confidence_score": new_score})\
+                        .eq("id", node_id)\
+                        .execute()
+            except Exception:
+                pass
+
+    return {
+        "message": "Feedback recorded",
+        "was_helpful": request.was_helpful
+    }

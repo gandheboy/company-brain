@@ -1,6 +1,5 @@
 'use client'
 import { useState } from 'react'
-import { apiPost } from '@/lib/api'
 import { useRouter } from 'next/navigation'
 
 interface QueryResult {
@@ -11,6 +10,14 @@ interface QueryResult {
   sources: string[]
   nodes_searched: number
   missing_info?: string
+  node_ids?: string[]
+}
+
+interface FeedbackState {
+  submitted: boolean
+  was_helpful: boolean | null
+  show_text_input: boolean
+  feedback_text: string
 }
 
 export default function QueryPage() {
@@ -19,25 +26,41 @@ export default function QueryPage() {
   const [result, setResult] = useState<QueryResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [history, setHistory] = useState<QueryResult[]>([])
+  const [feedback, setFeedback] = useState<FeedbackState>({
+    submitted: false,
+    was_helpful: null,
+    show_text_input: false,
+    feedback_text: ''
+  })
 
   const handleQuery = async () => {
     if (!question.trim() || loading) return
 
     setLoading(true)
     setResult(null)
+    setFeedback({
+      submitted: false,
+      was_helpful: null,
+      show_text_input: false,
+      feedback_text: ''
+    })
 
     try {
-      const response = await apiPost('/api/knowledge/query', {
-        question: question.trim()
-      })
-
-      setResult(response)
-      setHistory(prev => [response, ...prev].slice(0, 10))
+      const response = await fetch(
+        'http://localhost:8000/api/knowledge/query-test',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question: question.trim() })
+        }
+      )
+      const data = await response.json()
+      setResult(data)
+      setHistory(prev => [data, ...prev].slice(0, 10))
     } catch (error) {
-      console.error('Query error:', error)
       setResult({
-        question: question,
-        answer: 'Error connecting to Company Brain. Make sure you are logged in.',
+        question,
+        answer: 'Error connecting. Make sure backend is running.',
         confidence: 0,
         has_answer: false,
         sources: [],
@@ -48,6 +71,51 @@ export default function QueryPage() {
     }
   }
 
+  const handleFeedback = async (was_helpful: boolean) => {
+    if (!result) return
+
+    setFeedback(prev => ({
+      ...prev,
+      was_helpful,
+      show_text_input: !was_helpful
+    }))
+
+    if (was_helpful) {
+      await submitFeedback(was_helpful, '')
+    }
+  }
+
+  const submitFeedback = async (
+    was_helpful: boolean,
+    feedback_text: string
+  ) => {
+    if (!result) return
+
+    try {
+      await fetch(
+        'http://localhost:8000/api/knowledge/feedback-test',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            question: result.question,
+            answer: result.answer,
+            was_helpful,
+            feedback_text,
+            node_ids_used: result.node_ids || []
+          })
+        }
+      )
+      setFeedback(prev => ({
+        ...prev,
+        submitted: true,
+        show_text_input: false
+      }))
+    } catch (error) {
+      console.error('Feedback error:', error)
+    }
+  }
+
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
@@ -55,11 +123,8 @@ export default function QueryPage() {
     }
   }
 
-  const confidenceColor = (confidence: number) => {
-    if (confidence >= 0.8) return '#22c55e'
-    if (confidence >= 0.5) return '#f59e0b'
-    return '#ef4444'
-  }
+  const confidenceColor = (c: number) =>
+    c >= 0.8 ? '#22c55e' : c >= 0.5 ? '#f59e0b' : '#ef4444'
 
   return (
     <div style={{
@@ -76,7 +141,11 @@ export default function QueryPage() {
         justifyContent: 'space-between',
         alignItems: 'center'
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.75rem'
+        }}>
           <span style={{ fontSize: '1.5rem' }}>🧠</span>
           <h1 style={{ fontSize: '1.1rem', fontWeight: 'bold' }}>
             Company Brain
@@ -103,10 +172,12 @@ export default function QueryPage() {
         margin: '0 auto',
         padding: '2rem'
       }}>
-
         {/* Title */}
         <div style={{ marginBottom: '2rem' }}>
-          <h2 style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>
+          <h2 style={{
+            fontSize: '1.5rem',
+            marginBottom: '0.5rem'
+          }}>
             Ask Your Company Brain 💬
           </h2>
           <p style={{ color: '#64748b', fontSize: '0.9rem' }}>
@@ -124,9 +195,9 @@ export default function QueryPage() {
         }}>
           <textarea
             value={question}
-            onChange={(e) => setQuestion(e.target.value)}
+            onChange={e => setQuestion(e.target.value)}
             onKeyDown={handleKeyPress}
-            placeholder="How do we handle refunds? Who approves exceptions? What is our deployment process?"
+            placeholder="How do we handle refunds? Who approves discounts? What is our deployment process?"
             rows={3}
             style={{
               width: '100%',
@@ -148,7 +219,10 @@ export default function QueryPage() {
             alignItems: 'center',
             marginTop: '1rem'
           }}>
-            <span style={{ color: '#475569', fontSize: '0.8rem' }}>
+            <span style={{
+              color: '#475569',
+              fontSize: '0.8rem'
+            }}>
               Press Enter to ask
             </span>
             <button
@@ -186,7 +260,12 @@ export default function QueryPage() {
             textAlign: 'center',
             marginBottom: '1.5rem'
           }}>
-            <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🧠</div>
+            <div style={{
+              fontSize: '2rem',
+              marginBottom: '0.5rem'
+            }}>
+              🧠
+            </div>
             <p style={{ color: '#64748b' }}>
               Searching knowledge base...
             </p>
@@ -197,7 +276,9 @@ export default function QueryPage() {
         {result && !loading && (
           <div style={{
             backgroundColor: '#0f172a',
-            border: `1px solid ${result.has_answer ? '#1e3a5f' : '#1e293b'}`,
+            border: `1px solid ${result.has_answer
+              ? '#1e3a5f'
+              : '#1e293b'}`,
             borderRadius: '12px',
             padding: '1.5rem',
             marginBottom: '1.5rem'
@@ -224,21 +305,22 @@ export default function QueryPage() {
               {result.answer}
             </div>
 
-            {/* Meta info */}
+            {/* Meta */}
             <div style={{
               display: 'flex',
               gap: '1rem',
-              flexWrap: 'wrap'
+              flexWrap: 'wrap',
+              marginBottom: '1.25rem'
             }}>
-
-              {/* Confidence */}
               <div style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: '0.4rem',
                 fontSize: '0.8rem'
               }}>
-                <span style={{ color: '#64748b' }}>Confidence:</span>
+                <span style={{ color: '#64748b' }}>
+                  Confidence:
+                </span>
                 <span style={{
                   color: confidenceColor(result.confidence),
                   fontWeight: 'bold'
@@ -247,20 +329,6 @@ export default function QueryPage() {
                 </span>
               </div>
 
-              {/* Nodes searched */}
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.4rem',
-                fontSize: '0.8rem'
-              }}>
-                <span style={{ color: '#64748b' }}>Nodes searched:</span>
-                <span style={{ color: '#94a3b8' }}>
-                  {result.nodes_searched}
-                </span>
-              </div>
-
-              {/* Sources */}
               {result.sources.length > 0 && (
                 <div style={{
                   display: 'flex',
@@ -269,8 +337,10 @@ export default function QueryPage() {
                   fontSize: '0.8rem',
                   flexWrap: 'wrap'
                 }}>
-                  <span style={{ color: '#64748b' }}>Sources:</span>
-                  {result.sources.map((source, i) => (
+                  <span style={{ color: '#64748b' }}>
+                    Sources:
+                  </span>
+                  {result.sources.map((s, i) => (
                     <span key={i} style={{
                       backgroundColor: '#1e3a5f',
                       color: '#93c5fd',
@@ -278,27 +348,122 @@ export default function QueryPage() {
                       borderRadius: '4px',
                       fontSize: '0.75rem'
                     }}>
-                      {source}
+                      {s}
                     </span>
                   ))}
                 </div>
               )}
             </div>
 
-            {/* Missing info */}
-            {result.missing_info && (
-              <div style={{
-                marginTop: '0.75rem',
-                padding: '0.75rem',
-                backgroundColor: '#1c1917',
-                border: '1px solid #292524',
-                borderRadius: '8px',
-                fontSize: '0.8rem',
-                color: '#a8a29e'
-              }}>
-                💡 To improve this answer: {result.missing_info}
-              </div>
-            )}
+            {/* Feedback section */}
+            <div style={{
+              borderTop: '1px solid #1e293b',
+              paddingTop: '1rem'
+            }}>
+              {!feedback.submitted ? (
+                <>
+                  <div style={{
+                    fontSize: '0.85rem',
+                    color: '#64748b',
+                    marginBottom: '0.75rem'
+                  }}>
+                    Was this answer helpful?
+                  </div>
+
+                  {feedback.was_helpful === null && (
+                    <div style={{
+                      display: 'flex',
+                      gap: '0.75rem'
+                    }}>
+                      <button
+                        onClick={() => handleFeedback(true)}
+                        style={{
+                          padding: '0.5rem 1.25rem',
+                          backgroundColor: '#166534',
+                          color: '#86efac',
+                          border: '1px solid #16a34a',
+                          borderRadius: '8px',
+                          cursor: 'pointer',
+                          fontSize: '0.9rem'
+                        }}
+                      >
+                        👍 Yes, helpful
+                      </button>
+                      <button
+                        onClick={() => handleFeedback(false)}
+                        style={{
+                          padding: '0.5rem 1.25rem',
+                          backgroundColor: '#450a0a',
+                          color: '#fca5a5',
+                          border: '1px solid #7f1d1d',
+                          borderRadius: '8px',
+                          cursor: 'pointer',
+                          fontSize: '0.9rem'
+                        }}
+                      >
+                        👎 Not helpful
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Not helpful text input */}
+                  {feedback.show_text_input && (
+                    <div style={{ marginTop: '0.75rem' }}>
+                      <textarea
+                        value={feedback.feedback_text}
+                        onChange={e => setFeedback(prev => ({
+                          ...prev,
+                          feedback_text: e.target.value
+                        }))}
+                        placeholder="What was wrong with this answer?"
+                        rows={2}
+                        style={{
+                          width: '100%',
+                          backgroundColor: '#1e293b',
+                          border: '1px solid #334155',
+                          borderRadius: '8px',
+                          color: 'white',
+                          padding: '0.6rem',
+                          fontSize: '0.85rem',
+                          resize: 'none',
+                          outline: 'none',
+                          boxSizing: 'border-box',
+                          marginBottom: '0.5rem'
+                        }}
+                      />
+                      <button
+                        onClick={() => submitFeedback(
+                          false,
+                          feedback.feedback_text
+                        )}
+                        style={{
+                          padding: '0.4rem 1rem',
+                          backgroundColor: '#3b82f6',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          fontSize: '0.85rem'
+                        }}
+                      >
+                        Submit Feedback
+                      </button>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div style={{
+                  color: feedback.was_helpful
+                    ? '#22c55e'
+                    : '#94a3b8',
+                  fontSize: '0.85rem'
+                }}>
+                  {feedback.was_helpful
+                    ? '✅ Thanks! Knowledge confidence boosted.'
+                    : '📝 Thanks! We\'ll improve this answer.'}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -324,7 +489,7 @@ export default function QueryPage() {
               'What is our deployment process?',
               'Who approves pricing exceptions?',
               'How do we onboard new employees?'
-            ].map((q) => (
+            ].map(q => (
               <div
                 key={q}
                 onClick={() => setQuestion(q)}
@@ -334,49 +499,18 @@ export default function QueryPage() {
                   cursor: 'pointer',
                   color: '#94a3b8',
                   fontSize: '0.9rem',
-                  borderBottom: '1px solid #1e293b',
-                  transition: 'background 0.15s'
+                  borderBottom: '1px solid #1e293b'
                 }}
                 onMouseEnter={e => {
-                  (e.target as HTMLElement).style.backgroundColor = '#1e293b'
+                  (e.target as HTMLElement)
+                    .style.backgroundColor = '#1e293b'
                 }}
                 onMouseLeave={e => {
-                  (e.target as HTMLElement).style.backgroundColor = 'transparent'
+                  (e.target as HTMLElement)
+                    .style.backgroundColor = 'transparent'
                 }}
               >
                 → {q}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* History */}
-        {history.length > 1 && (
-          <div style={{ marginTop: '1.5rem' }}>
-            <h3 style={{
-              fontSize: '0.85rem',
-              color: '#64748b',
-              marginBottom: '1rem',
-              textTransform: 'uppercase'
-            }}>
-              Previous Questions
-            </h3>
-            {history.slice(1).map((item, i) => (
-              <div
-                key={i}
-                onClick={() => setResult(item)}
-                style={{
-                  padding: '0.75rem 1rem',
-                  backgroundColor: '#0f172a',
-                  border: '1px solid #1e293b',
-                  borderRadius: '8px',
-                  marginBottom: '0.5rem',
-                  cursor: 'pointer',
-                  fontSize: '0.85rem',
-                  color: '#94a3b8'
-                }}
-              >
-                {item.has_answer ? '✅' : '❓'} {item.question}
               </div>
             ))}
           </div>
