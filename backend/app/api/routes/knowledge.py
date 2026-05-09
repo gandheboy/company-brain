@@ -375,3 +375,66 @@ async def resolve_conflict_route(
     )
 
     return result
+
+@router.get("/knowledge/nodes-test")
+async def list_nodes_test():
+    """Get all nodes without auth. Dev only."""
+    from app.core.database import supabase
+
+    orgs = supabase.table("organizations")\
+        .select("id")\
+        .limit(1)\
+        .execute()
+
+    if not orgs.data:
+        raise HTTPException(
+            status_code=400,
+            detail="No organizations found."
+        )
+
+    nodes = get_knowledge_nodes(
+        org_id=orgs.data[0]["id"],
+        limit=100
+    )
+
+    return {
+        "total": len(nodes),
+        "nodes": nodes
+    }
+
+
+@router.patch("/knowledge/nodes/{node_id}/verify-test")
+async def verify_node_test(node_id: str):
+    """Verify node without auth. Dev only."""
+    from app.core.database import supabase
+
+    orgs = supabase.table("organizations")\
+        .select("id")\
+        .limit(1)\
+        .execute()
+
+    if not orgs.data:
+        raise HTTPException(status_code=400, detail="No org")
+
+    node = verify_knowledge_node(
+        node_id,
+        orgs.data[0]["id"]
+    )
+    return node
+
+
+@router.delete("/knowledge/nodes/{node_id}/delete-test")
+async def delete_node_test(node_id: str):
+    """Delete node without auth. Dev only."""
+    from app.core.database import supabase
+
+    orgs = supabase.table("organizations")\
+        .select("id")\
+        .limit(1)\
+        .execute()
+
+    if not orgs.data:
+        raise HTTPException(status_code=400, detail="No org")
+
+    delete_knowledge_node(node_id, orgs.data[0]["id"])
+    return {"message": "Deleted"}

@@ -299,6 +299,21 @@ export default function Dashboard() {
             >
               ⚡ Skills File
             </button>
+            <button
+              onClick={() => router.push('/dashboard/knowledge')}
+              style={{
+                padding: '0.6rem 1.5rem',
+                backgroundColor: '#0f172a',
+                color: '#8b5cf6',
+                border: '1px solid #4c1d95',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontSize: '0.9rem',
+                fontWeight: 'bold'
+              }}
+            >
+              🧠 Knowledge Explorer
+            </button>
           </div>
         </div>
 
