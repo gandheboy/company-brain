@@ -239,3 +239,103 @@ async def extract_save_test(request: ExtractAndSaveRequest):
         "nodes_saved": len(saved),
         "nodes": saved
     }
+
+class QueryRequest(BaseModel):
+    question: str
+
+
+@router.post("/knowledge/query-test")
+async def query_test(request: QueryRequest):
+    """
+    Full query pipeline WITHOUT auth.
+    Development testing only.
+    """
+    from app.core.database import supabase
+    from app.services.ai_service import answer_question
+
+    if not request.question.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Question cannot be empty"
+        )
+
+    # Get first org for testing
+    orgs = supabase.table("organizations")\
+        .select("id, name")\
+        .limit(1)\
+        .execute()
+
+    if not orgs.data:
+        raise HTTPException(
+            status_code=400,
+            detail="No organizations found."
+        )
+
+    org_id = orgs.data[0]["id"]
+    org_name = orgs.data[0]["name"]
+
+    # Search for relevant knowledge
+    results = search_knowledge(
+        org_id=org_id,
+        query=request.question,
+        limit=5
+    )
+
+    # Generate answer using AI
+    answer = await answer_question(
+        question=request.question,
+        knowledge_nodes=results,
+        org_name=org_name
+    )
+
+    return {
+        "question": request.question,
+        "answer": answer.get("answer"),
+        "confidence": answer.get("confidence"),
+        "has_answer": answer.get("has_answer"),
+        "sources": answer.get("sources_used", []),
+        "nodes_searched": len(results),
+        "missing_info": answer.get("missing_info")
+    }
+
+
+@router.post("/knowledge/query")
+async def query_knowledge(
+    request: QueryRequest,
+    current_org=Depends(get_current_org)
+):
+    """
+    Full query pipeline WITH auth.
+    Production endpoint.
+    """
+    from app.services.ai_service import answer_question
+
+    if not request.question.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Question cannot be empty"
+        )
+
+    # Search relevant knowledge
+    results = search_knowledge(
+        org_id=current_org["id"],
+        query=request.question,
+        limit=5
+    )
+
+    # Generate answer
+    answer = await answer_question(
+        question=request.question,
+        knowledge_nodes=results,
+        org_name=current_org["name"]
+    )
+
+    return {
+        "question": request.question,
+        "answer": answer.get("answer"),
+        "confidence": answer.get("confidence"),
+        "has_answer": answer.get("has_answer"),
+        "sources": answer.get("sources_used", []),
+        "nodes_searched": len(results),
+        "missing_info": answer.get("missing_info")
+    }

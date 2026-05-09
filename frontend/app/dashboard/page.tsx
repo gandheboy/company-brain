@@ -150,10 +150,25 @@ export default function Dashboard() {
           <h2 style={{ fontSize: '1.3rem', marginBottom: '0.4rem' }}>
             Welcome back 👋
           </h2>
-          <p style={{ color: '#64748b', fontSize: '0.9rem' }}>
-            Your Company Brain is ready. Connect your first integration to start
-            extracting knowledge.
-          </p>
+          <p style={{ color: '#64748b', fontSize: '0.9rem', marginBottom: '1rem' }}>
+  Your Company Brain is ready. Connect your first integration to start
+  extracting knowledge.
+</p>
+<button
+  onClick={() => router.push('/dashboard/query')}
+  style={{
+    padding: '0.6rem 1.5rem',
+    backgroundColor: '#3b82f6',
+    color: 'white',
+    border: 'none',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    fontSize: '0.9rem',
+    fontWeight: 'bold'
+  }}
+>
+  💬 Ask Your Brain
+</button>
         </div>
 
         {/* Stats */}
