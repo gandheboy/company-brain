@@ -1,6 +1,8 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { isBackendOnline } from '@/lib/health'
+import { BackendOfflineBanner } from '@/components/ErrorBanner'
 import { useRouter } from 'next/navigation'
 
 interface Stats {
@@ -26,6 +28,7 @@ export default function Dashboard() {
     documents: 0
   })
   const [loading, setLoading] = useState(true)
+  const [backendOnline, setBackendOnline] = useState(true)
   const [currentPath, setCurrentPath] = useState('/dashboard')
 
   useEffect(() => {
@@ -33,6 +36,13 @@ export default function Dashboard() {
   }, [])
 
   const initialize = async () => {
+    const online = await isBackendOnline()
+    setBackendOnline(online)
+    if (!online) {
+      setLoading(false)
+      return
+    }
+
     const { data: { user } } = await supabase.auth.getUser()
 
     if (!user) {
@@ -414,6 +424,7 @@ export default function Dashboard() {
           padding: '2rem',
           maxWidth: '900px'
         }}>
+          <BackendOfflineBanner show={!backendOnline} />
 
           {/* Welcome header */}
           <div style={{ marginBottom: '2rem' }}>

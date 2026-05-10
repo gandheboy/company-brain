@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { LoadingSpinner } from '@/components/ErrorBanner'
 
 interface QueryResult {
   question: string
@@ -252,24 +253,7 @@ export default function QueryPage() {
 
         {/* Loading */}
         {loading && (
-          <div style={{
-            backgroundColor: '#0f172a',
-            border: '1px solid #1e293b',
-            borderRadius: '12px',
-            padding: '2rem',
-            textAlign: 'center',
-            marginBottom: '1.5rem'
-          }}>
-            <div style={{
-              fontSize: '2rem',
-              marginBottom: '0.5rem'
-            }}>
-              🧠
-            </div>
-            <p style={{ color: '#64748b' }}>
-              Searching knowledge base...
-            </p>
-          </div>
+          <LoadingSpinner message="Searching knowledge base..." />
         )}
 
         {/* Result */}
