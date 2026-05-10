@@ -9,8 +9,49 @@ export default function LandingPage() {
 
   useEffect(() => {
     const checkAuth = async () => {
+      // Handle email verification tokens in URL
+      const hashParams = new URLSearchParams(
+        window.location.hash.substring(1)
+      )
+      const accessToken = hashParams.get('access_token')
+      const type = hashParams.get('type')
+
+      if (accessToken && type === 'signup') {
+        // New user verified email
+        // Set session from token
+        await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: hashParams.get('refresh_token') || ''
+        })
+        router.push('/onboarding')
+        return
+      }
+
+      if (accessToken) {
+        // Existing user verified something
+        await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: hashParams.get('refresh_token') || ''
+        })
+        router.push('/dashboard')
+        return
+      }
+
+      // Normal flow — check if already logged in
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
+        // Check if new user needs onboarding
+        const onboardingDone = localStorage.getItem('onboarding_complete')
+        if (!onboardingDone) {
+          const createdAt = new Date(user.created_at).getTime()
+          const now = Date.now()
+          const isNewUser = (now - createdAt) < 300000 // 5 minutes
+
+          if (isNewUser) {
+            router.push('/onboarding')
+            return
+          }
+        }
         router.push('/dashboard')
       } else {
         setChecking(false)

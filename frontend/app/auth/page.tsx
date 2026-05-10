@@ -26,7 +26,7 @@ export default function AuthPage() {
           password
         })
         if (error) throw error
-        router.push('/dashboard')
+        router.push('/onboarding')
 
       } else {
         // SIGNUP
